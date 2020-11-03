@@ -1,3 +1,9 @@
+/*	Assignment 3: smallsh
+		Natthaphong Kongkaew
+		ONID: kongkaen
+		CS 344 Oregon State University
+*/
+
 #include <sys/types.h>
 #include <unistd.h>
 #include <stdio.h>
