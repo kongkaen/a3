@@ -1,77 +1,98 @@
-//
-//  Patrick Dicks
-//  Program 3 - smallsh
-//  smallsh.c
-//  CS 344 - Operating Systems
-//  11/14/2018
-//
-
-#include <stdio.h>
-#include <fcntl.h>
-#include <signal.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <sys/wait.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <signal.h>
+#include <fcntl.h>
 
-#define MAX_LINE_LEN 2048
-#define MAX_NUM_ARG 512
+#define MAX_COMMANDLENGTH 2048
+#define MAX_ARGUMENT 512
 
-int fgMode = 0;  // boolean foreground only mode
+int bgMode = 1;
 
-void catchSIGINT(int);  // terminate foreground child process with ^c
-void catchSIGTSTP(int);  // enable/disable foreground only mode
-void exitFunc(void);  // exit shell and kills any other processes or jobs
-void cd(char *, int *);  // change working directory of shell
-void status(int);  // print exit status/signal of last foreground process
-char *readLine();  // read user input
-void expandPid(char *, char *);  // expand "$$" into shell process ID
-char **processLine(char *, char **, char **, int *);  // parse input
-void bgProcessCheck(int *);  // check for completed backbround process
-// non-built in command
-void execute(char **, char **, char **, int, struct sigaction, int *);
-// run inputted comand
-void runCommand(char **, char **, char **, int *, struct sigaction, int *);
-void smallshLoop(void);  // loop smallsh
+char* getLine() {
 
-int main(int argc, char *argv[]) { smallshLoop(); }
+	char *line = (char *)malloc(MAX_COMMANDLENGTH * sizeof(char));
+	if (line == NULL) {
+			fprintf(stderr, "failed to allocate memory.");
+			exit(1);
+	}
 
-// catches SIGINT signal sent when user enters ^c
-void catchSIGINT(int signo) {
-    char *message = "Caught SIGINT.\n";
-    write(STDOUT_FILENO, message, 15);
+	//int i, j;
+
+	// Prompt user to get input command when ": " appear
+	printf(": ");
+	fflush(stdout);
+	fgets(line, MAX_COMMANDLENGTH, stdin);
+
+	return line;
 }
 
-// catches SIGTSTP signal sent when user enters ^z
-void catchSIGTSTP(int signo) {
-    if (!fgMode) {  // turn foreground only mode on
-        char *message = "Entering foreground-only mode (& is now ignored)\n";
-        write(STDOUT_FILENO, message, 49);
-        fflush(stdout);  // flush output buffers
-        fgMode = 1;
-    }
-    else {  // turn foreground only mode off
-        char *message = "Exiting foreground-only mode\n";
-        write(STDOUT_FILENO, message, 29);
-        fflush(stdout);  // flush output buffers
-        fgMode = 0;
-    }
-}
+void parseLine(char *line, char* arg[], char input[], char output[], int pid, int *backgroundProcess){
+	char *token = strtok(line, " \n");
 
-void exitFunc() { _exit(0); }
+	int i,j;
+
+	// If it's blank, return blank
+	if (!strcmp(line, "")) {
+		arg[0] = strdup("");
+		return;
+	}
+/*
+	//check if string line contained $$
+	char *p = strstr(line, "$$");
+	if (p) { expandPid(line, p); }
+*/
+	for (i = 0; token; i++) {
+		// Check for & to be a background process
+		if (strcmp(token, "&") == 0) {
+			*backgroundProcess = 1;
+		}
+		// Check for < to denote input file
+		else if (strcmp(token, "<") == 0) {
+			token = strtok(NULL, " \n");
+			strcpy(input, token);
+		}
+		// Check for > to denote output file
+		else if (strcmp(token, ">") == 0) {
+			token = strtok(NULL, " \n");
+			strcpy(output, token);
+		}
+		// Otherwise, it's part of the command!
+		else {
+			arg[i] = strdup(token);
+			// Replace $$ with pid
+			// Only occurs at end of string in testscirpt
+			for (j=0; arg[i][j]; j++) {
+				if (arg[i][j] == '$' &&
+					 arg[i][j+1] == '$') {
+					arg[i][j] = '\0';
+					snprintf(arg[i], 256, "%s%d", arg[i], pid);
+				}
+			}
+		}
+		// Next!
+		token = strtok(NULL, " \n");
+	}
+}
 
 void cd(char *path, int *exitStatus) {
     int ret;
 
     // set path to HOME environment variable if not specified
-    if (path == NULL) { path = getenv("HOME"); }
+    if (path == NULL) {
+			path = getenv("HOME");
+		}
 
     ret = chdir(path);
-    if (ret < 0) { perror("chdir()"); *exitStatus = 1; }
+
+    if (ret < 0) {
+			perror("chdir()"); *exitStatus = 1;
+		}
 }
 
-void status(int exitStatus) {
+void printExitStatus(int exitStatus) {
     if (WIFEXITED(exitStatus) != 0) {  // exited
         printf("exit value %d\n", WEXITSTATUS(exitStatus));
         fflush(stdout);  // flush output buffers
@@ -82,231 +103,192 @@ void status(int exitStatus) {
     }
 }
 
-char *readLine() {
-    int len = MAX_LINE_LEN;
-    char *line = (char *)malloc(len * sizeof(char));
-    if (line == NULL) {
-        fprintf(stderr, "failed to allocate memory.");
-        exit(1);
-    }
-    fgets(line, len, stdin);
-    return line;
+void catchSIGTSTP(int signo) {
+
+	// If it's 1, set it to 0 and display a message reentrantly
+	if (bgMode == 1) {
+		char* message = "Entering foreground-only mode (& is now ignored)\n";
+		write(1, message, 49);
+		fflush(stdout);
+		bgMode = 0;
+	}
+
+	// If it's 0, set it to 1 and display a message reentrantly
+	else {
+		char* message = "Exiting foreground-only mode\n";
+		write (1, message, 29);
+		fflush(stdout);
+		bgMode = 1;
+	}
 }
 
-void expandPid(char *line, char *p) {
-    char firstPart[256];
-    memset(firstPart, '\0', sizeof(firstPart));
-    char secondPart[256];
-    memset(secondPart, '\0', sizeof(secondPart));
+void execute(char* argument[], int* exitStatus, struct sigaction SIGINT_action, int* backgroundProcess, char input[], char output[]) {
 
-    int count = 0;
-    char *c;
-    for (c = line; c != p; c++) {
-        firstPart[count] = *c;
-        count++;
-    }
+	pid_t spawnPid = -5;  // initialize with junk
+	int sourceFD, targetFD, result;
 
-    count = 0;
-    for (c += 2; *c != '\0'; c++) {
-        secondPart[count] = *c;
-        count++;
-    }
+	spawnPid = fork();  // fork new process
 
-        sprintf(line, "%s%d%s", firstPart, getpid(), secondPart);
+	switch (spawnPid) {
+
+		case -1:// fail to create child process
+			perror("fork() failed");
+			break;
+
+		case 0:
+			// The process will now take ^C as default
+			SIGINT_action.sa_handler = SIG_DFL;
+			sigaction(SIGINT, &SIGINT_action, NULL);
+
+			// Handle input
+			if (strcmp(input, "")) {
+				// open it
+				sourceFD = open(input, O_RDONLY);
+				if (sourceFD == -1) {
+					printf("Cannot open %s for input\n", input);
+					exit(1);
+				}
+				// assign it
+				result = dup2(sourceFD, 0);
+				if (result == -1) {
+					perror("Cannot assign input file\n");
+					exit(2);
+				}
+				// trigger its close
+				fcntl(sourceFD, F_SETFD, FD_CLOEXEC);
+			}
+
+			// Handle output
+			if (strcmp(output, "")) {
+				// open it
+				targetFD = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+				if (targetFD == -1) {
+					perror("Cannot open output file\n");
+					exit(1);
+				}
+				// assign it
+				result = dup2(targetFD, 1);
+				if (result == -1) {
+					perror("Cannot assign output file\n");
+					exit(2);
+				}
+				// trigger its close
+				fcntl(targetFD, F_SETFD, FD_CLOEXEC);
+			}
+
+			// Execute it!
+			if (execvp(argument[0], (char* const*)argument)) {
+				printf("%s: no such file or directory\n", argument[0]);
+				fflush(stdout);
+				exit(2);
+			}
+			break;
+
+			default:
+				// Execute a process in the background ONLY if bgMode
+				if (*backgroundProcess && bgMode) {
+					pid_t actualPid = waitpid(spawnPid, exitStatus, WNOHANG);
+					printf("background pid is %d\n", spawnPid);
+					fflush(stdout);
+				}
+				// Otherwise execute it like normal
+				else {
+					pid_t actualPid = waitpid(spawnPid, exitStatus, 0);
+				}
+
+			// Check for terminated background processes!
+			while ((spawnPid = waitpid(-1, exitStatus, WNOHANG)) > 0) {
+				printf("child %d terminated\n", spawnPid);
+				printExitStatus(*exitStatus);
+				fflush(stdout);
+			}
+
+	}
+
 }
 
-char **processLine(char *line, char **input, char **output, int *bgProcess) {
-    char **args = malloc(MAX_NUM_ARG * sizeof(char *));
-    if (args == NULL) {
-        fprintf(stderr, "failed to allocate memory.");
-        exit(1);
-    }
+int main() {
 
-    char *p = strstr(line, "$$");  // check if line contains "$$"
-    if (p) { expandPid(line, p); }  // if so, expand it
+	int pid = getpid();
+	int inLoop = 1;
+	int i;
+	int exitStatus = 0;
+	int backgroundProcess = 0;
 
-    char *token = strtok(line, " \n");
-    int count = 0;
-    while (token != NULL) {
-        if (strcmp(token, "<") == 0) {  // stdin
-            token = strtok(NULL, " \n");
-            *input = token;
-            token = strtok(NULL, " \n");
-        }
-        else if (strcmp(token, ">") == 0) {  // stdout
-            token = strtok(NULL, " \n");
-            *output = token;
-            token = strtok(NULL, " \n");
-        }
-        else {
-            args[count] = token;
-            token = strtok(NULL, " \n");
-            count++;
-        }
-    }
+	// initialize array of input file name and output file name
+	char input[100] = {0};
+	char output[100] = {0};
 
-    if (count > 0) {  // if user did not enter blank line
-        if (strcmp(args[count - 1], "&") == 0) {  // check for "&"
-            if (fgMode == 0) {
-                *bgProcess = 1;  // set background process to true
-            }
-            count--;  // decrement count to replace "&" in array
-        }
+	// Initialize input argument to support maximum of 512 arguments
+	char* line;
+	char* argument[512];
 
-        args[count] = NULL;  // indicates end of parameters
-    }
+	for (i=0; i<512; i++) {
+		argument[i] = NULL;
+	}
 
-    return args;
-}
 
-void bgProcessCheck(int *exitStatus) {
-    pid_t wpid = waitpid(-1, exitStatus, WNOHANG);
-    while (wpid > 0) {
-        printf("background pid %d is done:\n", wpid);
-        fflush(stdout);  // flush output buffer
-        status(*exitStatus);
-        // check for completed child background processes
-        wpid = waitpid(-1, exitStatus, WNOHANG);
-    }
-}
+	// Signal Handlers
 
-// Creates new process using fork and runs command using exec
-void execute(char **args, char **input, char **output, int bgProcess,
-struct sigaction SIGINT_action, int *exitStatus) {
-    pid_t spawnPid = -5;  // initialize with junk value
-    int sourceFD, targetFD, result;
+	// Ignore ^C
+	struct sigaction SIGINT_action = {0};
+	SIGINT_action.sa_handler = SIG_IGN;
+	sigfillset(&SIGINT_action.sa_mask);
+	SIGINT_action.sa_flags = 0;
+	sigaction(SIGINT, &SIGINT_action, NULL);
 
-    spawnPid = fork();  // create new process
-    switch (spawnPid) {
-        case -1:  // child process creation unsuccessful
-            perror("fork()");
-            break;
-        case 0:  // child
-            if (bgProcess) {
-                // redirect stdin if not specified
-                if (*input == NULL) { *input = "/dev/null"; }
-                // redirect stdout if not specified
-                if (*output == NULL) { *output = "/dev/null"; }
-            }
-            else {  // allow foreground process to be interrupted
-                SIGINT_action.sa_handler = SIG_DFL;
-                sigaction(SIGINT, &SIGINT_action, NULL);
-            }
+	// Redirect ^Z to catchSIGTSTP()
+	struct sigaction SIGTSTP_action = {0};
+	SIGTSTP_action.sa_handler = catchSIGTSTP;
+	sigfillset(&SIGTSTP_action.sa_mask);
+	SIGTSTP_action.sa_flags = 0;
+	sigaction(SIGTSTP, &SIGTSTP_action, NULL);
 
-            if (*input != NULL) {  // redirect stdin to specified file
-                sourceFD = open(*input, O_RDONLY);
-                if (sourceFD == -1) {
-                    printf("cannot open %s for input\n", *input);
-                    fflush(stdout);  // flush output buffers
-                    *exitStatus = 1;
-                    exit(1);
-                }
 
-                result = dup2(sourceFD, 0);
-                if (result == -1) {
-                    perror("source dup2()");
-                    *exitStatus = 1;
-                    exit(1);
-                }
-            }
+	do {
 
-            if (*output != NULL) {  // redirect stdout to specified file
-                targetFD = open(*output, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                if (targetFD == -1) {
-                    perror("target open()");
-                    *exitStatus = 1;
-                    exit(1);
-                }
+	line = getLine();
+	//printf("line is %s ", line);
 
-                result = dup2(targetFD, 1);
-                if (result == -1) {
-                    perror("target dup2()");
-                    *exitStatus = 1;
-                    exit(1);
-                }
-            }
+	parseLine(line, argument, input, output, pid, &backgroundProcess);
 
-            if (execvp(args[0], args) < 0) {  // execute command
-                printf("%s: no such file or directory", args[0]);
-                fflush(stdout);  // flush output buffers
-                *exitStatus = 1;
-                exit(1);
-            }
-            break;  // arbitrary
-        default:  // parent
-            if (bgProcess) {
-                printf("background pid is %d\n", spawnPid);
-                fflush(stdout);  // flush output buffers
-            }
-            else {
-                waitpid(spawnPid, exitStatus, 0);
-                // if process was terminated by a signal, print its status
-                if (WIFSIGNALED(*exitStatus) != 0) { status(*exitStatus); }
-            }
+	//printf("argument 3 is %s\n", argument[2]);
 
-            // check for completed background processes
-            bgProcessCheck(exitStatus);
-    }
-}
+	// ignore blank from command #
+	if (argument[0][0] == '#' ||
+				argument[0][0] == '\0') {
+		continue;
+	}
 
-void runCommand(char **args, char **input, char **output, int *bgProcess,
-struct sigaction SIGINT_action, int *exitStatus) {
-    // Ignore blank lines and comments.
-    if ((args[0] != NULL) && (*(args[0]) != '#')) {
-        if (strcmp(args[0], "exit") == 0) { exitFunc(); }
-        else if (strcmp(args[0], "cd") == 0) { cd(args[1], exitStatus); }
-        else if (strcmp(args[0], "status") == 0) { status(*exitStatus); }
-        else {  // non-built in command
-            execute(args, input, output, *bgProcess, SIGINT_action, exitStatus);
-        }
-    }
-}
+	// exit
+	else if (strcmp(argument[0], "exit") == 0) {
+		inLoop = 0;
+	}
 
-void smallshLoop(void) {
-    int exitStatus = 0;
-    struct sigaction SIGINT_action = {0}, SIGTSTP_action = {0};
+	else if (strcmp(argument[0], "cd") == 0) {
+		cd(argument[1], &exitStatus);
+	}
 
-    SIGINT_action.sa_handler = SIG_IGN;
-    sigfillset(&SIGINT_action.sa_mask);
-    SIGINT_action.sa_flags = 0;
+	// STATUS
+	else if (strcmp(argument[0], "status") == 0) {
+		printExitStatus(exitStatus);
+	}
 
-    SIGTSTP_action.sa_handler = catchSIGTSTP;
-    sigfillset(&SIGTSTP_action.sa_mask);
-    SIGTSTP_action.sa_flags = 0;
+	// Anything else
+	else {
+		execute(argument, &exitStatus, SIGINT_action, &backgroundProcess, input, output);
+	}
 
-    sigaction(SIGINT, &SIGINT_action, NULL);
-    sigaction(SIGTSTP, &SIGTSTP_action, NULL);
+	// Reset variables
+	for (i=0; argument[i]; i++) {
+		argument[i] = NULL;
+	}
+	backgroundProcess = 0;
+	input[0] = '\0';
+	output[0] = '\0';
 
-    while (1)  // break free once exit command is run
-    {
-        int bgProcess = 0;  // boolean background process value
 
-        char **input = malloc(sizeof(char *));
-        if (input == NULL) {
-            fprintf(stderr, "failed to allocate memory.");
-            exit(1);
-        }
-        *input = NULL;
+	} while (inLoop);
 
-        char **output = malloc(sizeof(char *));
-        if (output == NULL) {
-            fprintf(stderr, "failed to allocate memory.");
-            exit(1);
-        }
-        *output = NULL;
-
-        printf(": ");
-        fflush(stdout);  // flush output buffers
-
-        char *line = readLine();
-        char **args = processLine(line, input, output, &bgProcess);
-        runCommand(args, input, output, &bgProcess, SIGINT_action, &exitStatus);
-
-        // clean up
-        memset(args, 0, (MAX_NUM_ARG*sizeof(args)));
-        free(line);
-        free(input);
-        free(output);
-        free(args);
-    }
+	return 0;
 }
