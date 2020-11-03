@@ -15,7 +15,93 @@
 #define MAX_COMMANDLENGTH 2048
 #define MAX_ARGUMENT 512
 
-int bgMode = 1;
+int bgModeAllow = 1;
+
+char* getLine();	// Get input from user
+void parseLine(char *line, char* arg[], char input[], char output[], int pid, int *backgroundProcess); // Parse input to arguments
+void cd(char *path, int *exitStatus);	// Change to directory
+void printExitStatus(int exitStatus);	// Print exit status of the program
+void catchSIGTSTP(int signo);	// Catch SIGTSTP signal
+void execute(char* argument[], int* exitStatus, struct sigaction SIGINT_action, int* backgroundProcess, char input[], char output[]);
+
+int main() {
+
+	int pid = getpid();
+	int inLoop = 1;
+
+	int exitStatus = 0;
+	int backgroundProcess = 0;
+
+	// initialize array of input file name and output file name
+	char input[100] = {0};
+	char output[100] = {0};
+
+	// Initialize pointer to user input line
+	char* line;
+
+	// Initialize input argument to support maximum of 512 arguments
+	char* argument[512];
+	int i;
+	for (i=0; i<512; i++) {
+		argument[i] = NULL;
+	}
+
+	// Signal to ignore ^C
+	struct sigaction SIGINT_action = {0};
+	SIGINT_action.sa_handler = SIG_IGN;
+	sigfillset(&SIGINT_action.sa_mask);
+	SIGINT_action.sa_flags = 0;
+	sigaction(SIGINT, &SIGINT_action, NULL);
+
+	// Redirect ^Z to catchSIGTSTP()
+	struct sigaction SIGTSTP_action = {0};
+	SIGTSTP_action.sa_handler = catchSIGTSTP;
+	sigfillset(&SIGTSTP_action.sa_mask);
+	SIGTSTP_action.sa_flags = 0;
+	sigaction(SIGTSTP, &SIGTSTP_action, NULL);
+
+	do {
+
+	line = getLine();		// Get input line from user
+	parseLine(line, argument, input, output, pid, &backgroundProcess); // Parse line into arguments
+
+	// ignore blank from command #
+	if (argument[0][0] != '#' && argument[0][0] != '\0') {
+		// exit
+		if (strcmp(argument[0], "exit") == 0) {
+			inLoop = 0;
+		}
+
+		else if (strcmp(argument[0], "cd") == 0) {
+			cd(argument[1], &exitStatus);
+		}
+
+		// STATUS
+		else if (strcmp(argument[0], "status") == 0) {
+			printExitStatus(exitStatus);
+		}
+
+		// Anything else
+		else {
+			execute(argument, &exitStatus, SIGINT_action, &backgroundProcess, input, output);
+		}
+	}
+
+	// Reset variables
+	for (i=0; argument[i]; i++) {
+		argument[i] = NULL;
+	}
+	backgroundProcess = 0;
+	input[0] = '\0';
+	output[0] = '\0';
+
+
+	} while (inLoop);
+
+	return 0;
+}
+
+
 
 char* getLine() {
 
@@ -112,11 +198,11 @@ void printExitStatus(int exitStatus) {
 void catchSIGTSTP(int signo) {
 
 	// If it's 1, set it to 0 and display a message reentrantly
-	if (bgMode == 1) {
+	if (bgModeAllow == 1) {
 		char* message = "Entering foreground-only mode (& is now ignored)\n";
 		write(1, message, 49);
 		fflush(stdout);
-		bgMode = 0;
+		bgModeAllow = 0;
 	}
 
 	// If it's 0, set it to 1 and display a message reentrantly
@@ -124,7 +210,7 @@ void catchSIGTSTP(int signo) {
 		char* message = "Exiting foreground-only mode\n";
 		write (1, message, 29);
 		fflush(stdout);
-		bgMode = 1;
+		bgModeAllow = 1;
 	}
 }
 
@@ -191,8 +277,8 @@ void execute(char* argument[], int* exitStatus, struct sigaction SIGINT_action, 
 			break;
 
 			default:
-				// Execute a process in the background ONLY if bgMode
-				if (*backgroundProcess && bgMode) {
+				// Execute a process in the background ONLY if bgModeAllow
+				if (*backgroundProcess && bgModeAllow) {
 					pid_t actualPid = waitpid(spawnPid, exitStatus, WNOHANG);
 					printf("background pid is %d\n", spawnPid);
 					fflush(stdout);
@@ -211,87 +297,4 @@ void execute(char* argument[], int* exitStatus, struct sigaction SIGINT_action, 
 
 	}
 
-}
-
-int main() {
-
-	int pid = getpid();
-	int inLoop = 1;
-	int i;
-	int exitStatus = 0;
-	int backgroundProcess = 0;
-
-	// initialize array of input file name and output file name
-	char input[100] = {0};
-	char output[100] = {0};
-
-	// Initialize input argument to support maximum of 512 arguments
-	char* line;
-	char* argument[512];
-
-	for (i=0; i<512; i++) {
-		argument[i] = NULL;
-	}
-
-
-	// Signal Handlers
-
-	// Ignore ^C
-	struct sigaction SIGINT_action = {0};
-	SIGINT_action.sa_handler = SIG_IGN;
-	sigfillset(&SIGINT_action.sa_mask);
-	SIGINT_action.sa_flags = 0;
-	sigaction(SIGINT, &SIGINT_action, NULL);
-
-	// Redirect ^Z to catchSIGTSTP()
-	struct sigaction SIGTSTP_action = {0};
-	SIGTSTP_action.sa_handler = catchSIGTSTP;
-	sigfillset(&SIGTSTP_action.sa_mask);
-	SIGTSTP_action.sa_flags = 0;
-	sigaction(SIGTSTP, &SIGTSTP_action, NULL);
-
-
-	do {
-
-	line = getLine();
-	//printf("line is %s ", line);
-
-	parseLine(line, argument, input, output, pid, &backgroundProcess);
-
-	//printf("argument 3 is %s\n", argument[2]);
-
-	// ignore blank from command #
-	if (argument[0][0] != '#' && argument[0][0] != '\0') {
-		// exit
-		if (strcmp(argument[0], "exit") == 0) {
-			inLoop = 0;
-		}
-
-		else if (strcmp(argument[0], "cd") == 0) {
-			cd(argument[1], &exitStatus);
-		}
-
-		// STATUS
-		else if (strcmp(argument[0], "status") == 0) {
-			printExitStatus(exitStatus);
-		}
-
-		// Anything else
-		else {
-			execute(argument, &exitStatus, SIGINT_action, &backgroundProcess, input, output);
-		}
-	}
-
-	// Reset variables
-	for (i=0; argument[i]; i++) {
-		argument[i] = NULL;
-	}
-	backgroundProcess = 0;
-	input[0] = '\0';
-	output[0] = '\0';
-
-
-	} while (inLoop);
-
-	return 0;
 }
