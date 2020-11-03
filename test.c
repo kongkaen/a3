@@ -28,7 +28,6 @@ int main() {
 
 	int pid = getpid();
 	int inLoop = 1;
-
 	int exitStatus = 0;
 	int backgroundProcess = 0;
 
@@ -65,43 +64,23 @@ int main() {
 	line = getLine();		// Get input line from user
 	parseLine(line, argument, input, output, pid, &backgroundProcess); // Parse line into arguments
 
-	// ignore blank from command #
-	if (argument[0][0] != '#' && argument[0][0] != '\0') {
-		// exit
-		if (strcmp(argument[0], "exit") == 0) {
-			inLoop = 0;
-		}
+	runCommand(argument, input, output, &backgroundProcess, SIGINT_action, &exitStatus) // Run command from arguments
 
-		else if (strcmp(argument[0], "cd") == 0) {
-			cd(argument[1], &exitStatus);
-		}
-
-		// STATUS
-		else if (strcmp(argument[0], "status") == 0) {
-			printExitStatus(exitStatus);
-		}
-
-		// Anything else
-		else {
-			execute(argument, &exitStatus, SIGINT_action, &backgroundProcess, input, output);
-		}
-	}
-
-	// Reset variables
+	// reset initialize arguments
 	for (i=0; argument[i]; i++) {
 		argument[i] = NULL;
 	}
-	backgroundProcess = 0;
+
+	backgroundProcess = 0;	// Set background process back to 0
+
+	// Reset file name
 	input[0] = '\0';
 	output[0] = '\0';
-
 
 	} while (inLoop);
 
 	return 0;
 }
-
-
 
 char* getLine() {
 
@@ -212,6 +191,32 @@ void catchSIGTSTP(int signo) {
 		fflush(stdout);
 		bgModeAllow = 1;
 	}
+}
+
+void runCommand(char *argument[], char input[], char output[], int *backgroundProcess,
+struct sigaction SIGINT_action, int *exitStatus) {
+		// Ignore blank lines and comments.
+		// ignore blank from command #
+		if (argument[0][0] != '#' && argument[0][0] != '\0') {
+			// exit
+			if (strcmp(argument[0], "exit") == 0) {
+				_exit(0);
+			}
+
+			else if (strcmp(argument[0], "cd") == 0) {
+				cd(argument[1], &exitStatus);
+			}
+
+			// STATUS
+			else if (strcmp(argument[0], "status") == 0) {
+				printExitStatus(exitStatus);
+			}
+
+			// Anything else
+			else {
+				execute(argument, &exitStatus, SIGINT_action, &backgroundProcess, input, output);
+			}
+		}
 }
 
 void execute(char* argument[], int* exitStatus, struct sigaction SIGINT_action, int* backgroundProcess, char input[], char output[]) {
