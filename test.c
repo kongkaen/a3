@@ -255,28 +255,25 @@ int main() {
 	//printf("argument 3 is %s\n", argument[2]);
 
 	// ignore blank from command #
-	if (argument[0][0] == '#' ||
-				argument[0][0] == '\0') {
-		continue;
-	}
+	if (argument[0][0] != '#' && argument[0][0] != '\0') {
+		// exit
+		if (strcmp(argument[0], "exit") == 0) {
+			inLoop = 0;
+		}
 
-	// exit
-	else if (strcmp(argument[0], "exit") == 0) {
-		inLoop = 0;
-	}
+		else if (strcmp(argument[0], "cd") == 0) {
+			cd(argument[1], &exitStatus);
+		}
 
-	else if (strcmp(argument[0], "cd") == 0) {
-		cd(argument[1], &exitStatus);
-	}
+		// STATUS
+		else if (strcmp(argument[0], "status") == 0) {
+			printExitStatus(exitStatus);
+		}
 
-	// STATUS
-	else if (strcmp(argument[0], "status") == 0) {
-		printExitStatus(exitStatus);
-	}
-
-	// Anything else
-	else {
-		execute(argument, &exitStatus, SIGINT_action, &backgroundProcess, input, output);
+		// Anything else
+		else {
+			execute(argument, &exitStatus, SIGINT_action, &backgroundProcess, input, output);
+		}
 	}
 
 	// Reset variables
