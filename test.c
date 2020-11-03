@@ -23,6 +23,7 @@ void cd(char *path, int *exitStatus);	// Change to directory
 void printExitStatus(int exitStatus);	// Print exit status of the program
 void catchSIGTSTP(int signo);	// Catch SIGTSTP signal
 void execute(char* argument[], int* exitStatus, struct sigaction SIGINT_action, int* backgroundProcess, char input[], char output[]);
+void runCommand(char *argument[], char input[], char output[], int *backgroundProcess, struct sigaction SIGINT_action, int *exitStatus);
 
 int main() {
 
@@ -64,7 +65,7 @@ int main() {
 	line = getLine();		// Get input line from user
 	parseLine(line, argument, input, output, pid, &backgroundProcess); // Parse line into arguments
 
-	runCommand(argument, input, output, &backgroundProcess, SIGINT_action, &exitStatus) // Run command from arguments
+	runCommand(argument, input, output, &backgroundProcess, SIGINT_action, &exitStatus); // Run command from arguments
 
 	// reset initialize arguments
 	for (i=0; argument[i]; i++) {
@@ -193,8 +194,7 @@ void catchSIGTSTP(int signo) {
 	}
 }
 
-void runCommand(char *argument[], char input[], char output[], int *backgroundProcess,
-struct sigaction SIGINT_action, int *exitStatus) {
+void runCommand(char *argument[], char input[], char output[], int *backgroundProcess, struct sigaction SIGINT_action, int *exitStatus) {
 		// Ignore blank lines and comments.
 		// ignore blank from command #
 		if (argument[0][0] != '#' && argument[0][0] != '\0') {
