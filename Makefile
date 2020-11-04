@@ -1,7 +1,7 @@
 CC = gcc
 
-main: test.c
-	$(CC) -o smallsh test.c
+main: smallsh.c
+	$(CC) -o smallsh smallsh.c
 
 clean:
 	rm -f smallsh
